@@ -11,11 +11,12 @@ class DiTConfig(typing.NamedTuple):
     time_dimension: int = 1024
     heads: int = 4
     layers: int = 4
+    patch_size: int = 1
     sequence_length: int = 1024
     eps: float = 1e-8
 
 
-def zero_init(layer: torch.nn.Linear) -> torch.nn.Linear:
+def zero_init(layer: torch.nn.Module) -> torch.nn.Module:
     torch.nn.init.zeros_(layer.weight)
 
     if layer.bias is not None:
@@ -78,28 +79,28 @@ class TimeEmbedding(torch.nn.Module):
 
 
 class PatchEmbedding(torch.nn.Module):
-    def __init__(self, input_dimension: int, hidden_dimension: int) -> None:
+    def __init__(self, input_dimension: int, hidden_dimension: int, patch_size: int) -> None:
         super().__init__()
 
-        self.linear = torch.nn.Linear(input_dimension, hidden_dimension, bias=False)
+        self.conv = torch.nn.Conv2d(input_dimension, hidden_dimension, patch_size, patch_size, padding=0, bias=False)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, int, int]:
+        x = self.conv(x)
         h, w = x.size(-2), x.size(-1)
         x = einops.rearrange(x, "b c h w -> b (h w) c")
-        x = self.linear(x)
 
         return x, h, w
 
 
 class PatchUnembedding(torch.nn.Module):
-    def __init__(self, input_dimension: int, hidden_dimension: int) -> None:
+    def __init__(self, input_dimension: int, hidden_dimension: int, patch_size: int) -> None:
         super().__init__()
 
-        self.linear = zero_init(torch.nn.Linear(hidden_dimension, input_dimension, bias=False))
+        self.conv = zero_init(torch.nn.ConvTranspose2d(hidden_dimension, input_dimension, patch_size, patch_size, padding=0, bias=False))
 
     def forward(self, x: torch.Tensor, h: int, w: int) -> torch.Tensor:
-        x = self.linear(x)
         x = einops.rearrange(x, "b (h w) c -> b c h w", h=h, w=w)
+        x = self.conv(x)
 
         return x
 
@@ -193,8 +194,8 @@ class DiT(torch.nn.Module):
         self.norm = torch.nn.LayerNorm(config.hidden_dimension, eps=config.eps, elementwise_affine=False, bias=False)
         self.modulation = Modulation(config.hidden_dimension, config.time_dimension)
         self.time_embedding = TimeEmbedding(config.time_dimension)
-        self.patch_embedding = PatchEmbedding(config.input_dimension, config.hidden_dimension)
-        self.patch_unembedding = PatchUnembedding(config.input_dimension, config.hidden_dimension)
+        self.patch_embedding = PatchEmbedding(config.input_dimension, config.hidden_dimension, config.patch_size)
+        self.patch_unembedding = PatchUnembedding(config.input_dimension, config.hidden_dimension, config.patch_size)
         self.blocks = torch.nn.ModuleList([DiTBlock(config) for _ in range(config.layers)])
 
         self.register_buffer(
