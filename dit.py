@@ -12,7 +12,7 @@ class DiTConfig(typing.NamedTuple):
     heads: int = 4
     layers: int = 4
     patch_size: int = 1
-    sequence_length: int = 1024
+    sequence_length: int = 1024  # NOTE: this should equal (height * width) // (patch_size * patch_size)
     eps: float = 1e-8
 
 
@@ -71,11 +71,11 @@ class TimeEmbedding(torch.nn.Module):
         self.register_buffer("scale", torch.randn([time_dimension // 2, 1]))
 
     def forward(self, time: torch.Tensor) -> torch.Tensor:
-        x = 2 * math.pi * time.view(-1, 1) @ self.scale.T
+        x = 2 * math.pi * time.unsqueeze(-1) @ self.scale.T
         x = torch.cat([x.cos(), x.sin()], dim=-1)
         x = self.linear(x)
 
-        return x[:, None, :]
+        return x
 
 
 class PatchEmbedding(torch.nn.Module):
